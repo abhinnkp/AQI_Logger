@@ -1,0 +1,3 @@
+FAN control logic
+GSM/Ethernet configurable via Web page
+Device Id change via web page
