@@ -151,6 +151,14 @@ bool        OTA_ENABLE_FLAG         = false;                                // O
 bool        isAuthenticated         = false;                                // User authentication state
 int         DATA_INTERVAL           = 1;                                    // Telemetry transmission interval (in minutes)
 int         COUNTER_30SEC           = 0;                                    // 30-second interval cycle counter
+// GSM Recovery Diagnostic Counters
+uint32_t    gsm_diag_tcp_failures   = 0;
+uint32_t    gsm_diag_pdp_recoveries = 0;
+uint32_t    gsm_diag_soft_resets    = 0;
+uint32_t    gsm_diag_hard_resets    = 0;
+uint32_t    gsm_diag_success_after_recovery = 0;
+String      gsm_diag_last_recovery  = "NONE";
+String      gsm_diag_last_result    = "OK";
 // Sensor Validity Mask
 struct SensorValidFlags {
     bool bme680;
@@ -438,6 +446,7 @@ String buildGSM_JSON()
 void gsmSendJSON()
 {
   static int consecutive_failures = 0;
+  static bool recovering = false;
 
   if (!gsmSendAT(
       "AT+QIOPEN=1,0,\"TCP\",\"" + gsmServerIP + "\",\"" + gsmServerPort,
@@ -462,19 +471,29 @@ void gsmSendJSON()
       {
         gsm_status.last_tx_time = String(weather_data.rtc_hour) + ":" + String(weather_data.rtc_min) + ":" + String(weather_data.rtc_sec);
         consecutive_failures = 0;
+        gsm_diag_last_result = "SUCCESS";
+        if (recovering) {
+            gsm_diag_success_after_recovery++;
+            recovering = false;
+        }
       }
       else
       {
         consecutive_failures++;
+        gsm_diag_last_result = "QISEND_NO_ACK";
       }
     }
     else
     {
       consecutive_failures++;
+      gsm_diag_last_result = "QISEND_PROMPT_TIMEOUT";
     }
   }
 
   // TCP Level Recovery (Level 1)
+  if (consecutive_failures > 0) {
+      gsm_diag_tcp_failures++;
+  }
   gsmSendAT("AT+QICLOSE=0", "OK", 5000);
   gsm_status.tcp_connected = false;
 
@@ -483,16 +502,43 @@ void gsmSendJSON()
       // Level 2: PDP Context Recovery
       USBSerial.println("[COMM RECOVERY LEVEL 2] 3 failures. PDP Deactivate.");
       gsmSendAT("AT+QIDEACT=1", "OK", 5000);
+      gsm_diag_pdp_recoveries++;
+      gsm_diag_last_recovery = "PDP_DEACT";
+      recovering = true;
   } else if (consecutive_failures == 5) {
       // Level 3: Software Re-initialization
       USBSerial.println("[COMM RECOVERY LEVEL 3] 5 failures. Software gsm_Init.");
       gsm_Init();
-      // Notice we do NOT reset the counter here. It only resets on success.
-  } else if (consecutive_failures >= 7) {
+      gsm_diag_soft_resets++;
+      gsm_diag_last_recovery = "SOFT_INIT";
+      recovering = true;
+  } else if (consecutive_failures == 7) {
       // Level 4: Hardware RESET_N
-      USBSerial.println("[COMM RECOVERY LEVEL 4] 7+ failures. Hardware RESET_N.");
+      USBSerial.println("[COMM RECOVERY LEVEL 4] 7 failures. Hardware RESET_N.");
       gsm_Hardware_Reset();
       gsm_Init(); // Re-establish UART logic and network state
+      gsm_diag_hard_resets++;
+      gsm_diag_last_recovery = "HARD_RESET";
+      recovering = true;
+  } else if (consecutive_failures > 7) {
+      // Modulo logic to repeatedly attempt recovery progressively, without causing an immediate boot-loop.
+      if ((consecutive_failures - 7) % 10 == 0) {
+          USBSerial.println("[COMM RECOVERY LEVEL 4] Throttled Hardware RESET_N.");
+          gsm_Hardware_Reset();
+          gsm_Init();
+          gsm_diag_hard_resets++;
+          gsm_diag_last_recovery = "HARD_RESET_THROTTLED";
+      } else if ((consecutive_failures - 7) % 5 == 0) {
+          USBSerial.println("[COMM RECOVERY LEVEL 3] Throttled Software gsm_Init.");
+          gsm_Init();
+          gsm_diag_soft_resets++;
+          gsm_diag_last_recovery = "SOFT_INIT_THROTTLED";
+      } else if ((consecutive_failures - 7) % 3 == 0) {
+          USBSerial.println("[COMM RECOVERY LEVEL 2] Throttled PDP Deactivate.");
+          gsmSendAT("AT+QIDEACT=1", "OK", 5000);
+          gsm_diag_pdp_recoveries++;
+          gsm_diag_last_recovery = "PDP_DEACT_THROTTLED";
+      }
   }
 }
 
