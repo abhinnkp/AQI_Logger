@@ -1684,10 +1684,10 @@ void handleSet() {
           DEVICE_ID = server.arg("device_id");
           save_device_id_NVS(DEVICE_ID);
       }
-      if (server.hasArg("gsm_ip") && server.arg("gsm_ip").length() < 64 &&
-          server.hasArg("gsm_port") && server.arg("gsm_port").length() < 10) {
-          gsmServerIP = server.arg("gsm_ip");
-          gsmServerPort = server.arg("gsm_port");
+      if (server.hasArg("gsmip") && server.arg("gsmip").length() < 64 &&
+          server.hasArg("gsmport") && server.arg("gsmport").length() < 10) {
+          gsmServerIP = server.arg("gsmip");
+          gsmServerPort = server.arg("gsmport");
           save_gsm_config_NVS(gsmServerIP, gsmServerPort);
       }
       if (server.hasArg("data_interval")) {
@@ -1715,14 +1715,7 @@ void handleSet() {
           save_server_config_NVS(serverIP, serverPort);
         }
       }
-      // GSM Server config
-      if (server.hasArg("gsmip") && server.hasArg("gsmport"))
-      {
-          gsmServerIP   = server.arg("gsmip");
-          gsmServerPort = server.arg("gsmport");
 
-          save_gsm_config_NVS(gsmServerIP, gsmServerPort);
-      }
       // RTC Config
       if (server.hasArg("date") && server.hasArg("time"))
       {
